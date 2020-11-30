@@ -8,9 +8,7 @@ render.py
 # 3) Running the video_rendering scripts
 """
 import functools
-import math
 import multiprocessing
-from fractions import Fraction
 from collections import OrderedDict
 import os
 import sys
@@ -28,17 +26,12 @@ from minerl.data.util import Blacklist
 from minerl.data.util.constants import (
     J, E,
     EXP_MIN_LEN_TICKS,
-    OUTPUT_DIR as WORKING_DIR,
     DATA_DIR,
     RENDER_DIR,
     BLACKLIST_TXT as BLACKLIST_PATH,
-    ACTION_FILE,
-    GOOD_MARKER_NAME, BAD_MARKER_NAME,
-    METADATA_FILES,
+    GOOD_MARKER_NAME,
     FAILED_COMMANDS,
     GENERATE_VERSION,
-    touch,
-    remove,
     ThreadManager
 )
 

@@ -113,13 +113,14 @@ def construct_render_dirs(blacklist):
             NULL_PTR_EXCEP_DIR,
             ZIP_ERROR_DIR,
             MISSING_RENDER_OUTPUT,
-            X11_ERROR_DIR]
+            X11_ERROR_DIR,
+            ] + RECORDING_PATH
 
     for dir in dirs:
         if not E(dir):
             os.makedirs(dir)
 
-            # We only care about unrendered directories.
+    # We only care about unrendered directories.
     render_dirs = []
 
     for filename in tqdm.tqdm(os.listdir(MERGED_DIR)):
@@ -161,8 +162,7 @@ def render_metadata(renders: list):
                     recording = get_recording_archive(recording_name)
 
                     def extract(fname):
-                        return recording.extract(
-                            fname, render_path)
+                        return recording.extract(fname, render_path)
 
                     # If everything is good extract the metadata.
                     for mfile in METADATA_FILES:
@@ -174,8 +174,10 @@ def render_metadata(renders: list):
                     with open(J(render_path, 'metaData.json'), 'r') as f:
                         # print(render_path)
                         jbos = json.load(f)
-                        # assert (ile["duration"] > 60000 or jbos["duration"] == 0)
-                        assert (jbos["duration"] > 300000)
+                        print(f)
+                        print(jbos)
+                        # assert (jbos["duration"] > 60000 or jbos["duration"] == 0)
+                        # assert jbos["duration"] > 300000, jbos["duration"]
 
                         # go through and check if we got the experiments.
 
@@ -233,8 +235,7 @@ def render_actions(renders: list):
                 recording = get_recording_archive(recording_name)
 
                 def extract(fname):
-                    return recording.extract(
-                        fname, render_path)
+                    return recording.extract(fname, render_path)
 
                 # Extract actions
                 assert str(ACTION_FILE) in [str(x)
@@ -578,7 +579,15 @@ def main():
     """
     The main render script.
     """
+
+    if not E(MERGED_DIR):
+        print("{} does not exist. Run merge.py first.")
+
     # 1. Load the blacklist.
+    blacklist_path = Path(BLACKLIST_PATH)
+    if not blacklist_path.exists():
+        blacklist_path.parent.mkdir(parents=True, exist_ok=True)
+        blacklist_path.touch()
     blacklist = set(np.loadtxt(BLACKLIST_PATH, dtype=np.str).tolist())
 
     print("Constructing render directories.")
@@ -603,8 +612,11 @@ def main():
     print("Rendering videos: ")
     clean_render_dirs()
 
+    # _render_videos(manager, unfinished_renders[0])
+
     # Render videos in multiprocessing queue
-    multiprocessing.freeze_support()
+    # multiprocessing.freeze_support()
+    import multiprocessing.dummy as multiprocessing
     with multiprocessing.Pool(
             NUM_MINECRAFT_DIR, initializer=tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
         manager = ThreadManager(multiprocessing.Manager(), NUM_MINECRAFT_DIR, 0, 1)

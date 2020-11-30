@@ -211,7 +211,7 @@ def construct_data_dirs(black_list):
 
 
 def _render_data(output_root, manager, input_tuple):
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    # signal.signal(signal.SIGINT, signal.SIG_IGN)
     n = manager.get_index()
     recording_dir, experiment_folder = input_tuple
     black_list = Blacklist()
@@ -412,7 +412,8 @@ def publish():
     if E('errors.txt'):
         os.remove('errors.txt')
     try:
-        multiprocessing.freeze_support()
+        # multiprocessing.freeze_support()
+        import multiprocessing.dummy as multiprocessing
         with multiprocessing.Pool(num_w, initializer=tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
             manager = ThreadManager(multiprocessing.Manager(), num_w, 1, 1)
             func = functools.partial(_render_data, DATA_DIR, manager)
