@@ -210,18 +210,22 @@ def construct_data_dirs(black_list):
     return data_dirs
 
 
-def _render_data(output_root, manager, input_tuple):
-    # signal.signal(signal.SIGINT, signal.SIG_IGN)
+def _render_data(output_root, manager, input_tuple, extra_env_specs=(), parallel=True):
+    if parallel:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
     n = manager.get_index()
     recording_dir, experiment_folder = input_tuple
     black_list = Blacklist()
-    ret = render_data(output_root, recording_dir, experiment_folder, black_list, lineNum=n)
+    ret = render_data(output_root, recording_dir, experiment_folder, black_list,
+                      extra_env_specs=extra_env_specs,
+                      lineNum=n)
     manager.free_index(n)
     return ret
 
 
 # 2. render numpy format
-def render_data(output_root, recording_dir, experiment_folder, black_list, lineNum=None):
+def render_data(output_root, recording_dir, experiment_folder, black_list,
+                extra_env_specs=(), lineNum=None):
     # Script to to pair actions with video recording
     # All times are in ms and we assume a actions list, a timestamp file, and a dis-synchronous mp4 video
 
@@ -238,8 +242,9 @@ def render_data(output_root, recording_dir, experiment_folder, black_list, lineN
 
     # Gather all renderable environments for this experiment directory
     rendered_envs = 0
+    all_env_specs = tuple(*env.ENVS, *extra_env_specs)
     filtered_environments = [
-        env_spec for env_spec in envs.ENVS if env_spec.is_from_folder(experiment_folder)]
+        env_spec for env_spec in all_env_specs if env_spec.is_from_folder(experiment_folder)]
     # Don't render if files are missing
     if not E(source_folder) or not E(recording_source) or not E(universal_source) or not E(metadata_source):
         black_list.add(segment_str)
@@ -397,7 +402,7 @@ def render_data(output_root, recording_dir, experiment_folder, black_list, lineN
     return rendered_envs
 
 
-def publish():
+def publish(extra_env_specs=(), parallel=True):
     """
     The main render script.
     """
@@ -412,11 +417,17 @@ def publish():
     if E('errors.txt'):
         os.remove('errors.txt')
     try:
-        # multiprocessing.freeze_support()
-        import multiprocessing.dummy as multiprocessing
+        if parallel:
+            import multiprocessing
+            multiprocessing.freeze_support()
+        else:
+            # Fake multiprocessing -- uses threads instead of processes for
+            # easier debugging and PDB-compatibility.
+            import multiprocessing.dummy as multiprocessing
+
         with multiprocessing.Pool(num_w, initializer=tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
             manager = ThreadManager(multiprocessing.Manager(), num_w, 1, 1)
-            func = functools.partial(_render_data, DATA_DIR, manager)
+            func = functools.partial(_render_data, DATA_DIR, manager, extra_env_specs=extra_env_specs, parallel=parallel)
             num_segments = list(
                 tqdm.tqdm(pool.imap_unordered(func, valid_data), total=len(valid_data), desc='Files', miniters=1,
                           position=0, maxinterval=1))
@@ -498,6 +509,11 @@ def package(out_dir=DATA_DIR):
             md5_file.write('{} {}\n'.format(hashlib.md5(open(archive_dir, 'rb').read()).hexdigest(), archive))
             sha1_file.write('{} {}\n'.format(hashlib.sha1(open(archive_dir, 'rb').read()).hexdigest(), archive))
             sha256_file.write('{} {}\n'.format(hashlib.sha256(open(archive_dir, 'rb').read()).hexdigest(), archive))
+
+
+def main(extra_env_specs, parallel=True):
+    publish(extra_env_specs, parallel=parallel)
+    package()
 
 
 if __name__ == "__main__":
