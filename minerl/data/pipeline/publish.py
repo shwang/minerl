@@ -511,7 +511,7 @@ def package(out_dir=DATA_DIR):
             sha256_file.write('{} {}\n'.format(hashlib.sha256(open(archive_dir, 'rb').read()).hexdigest(), archive))
 
 
-def main(extra_env_specs, parallel=True):
+def main(extra_env_specs=(), parallel=True):
     publish(extra_env_specs, parallel=parallel)
     package()
 
