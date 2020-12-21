@@ -236,6 +236,15 @@ class MineRLEnv(gym.Env):
         self.xml = e
         self.xml.find(self.ns + 'ClientRole').text = str(self.role)
         self.xml.find(self.ns + 'ExperimentUID').text = self.exp_uid
+        file_world_generator = self.xml.find('.//' + self.ns + 'FileWorldGenerator')
+        if file_world_generator is not None:
+            fileworld_path = file_world_generator.attrib['src']
+            if not os.path.isabs(fileworld_path):
+                # If the path for the FileWorldGenerator is a relative path,
+                # assume it to be relative to the xml file itself
+                xml_directory = os.path.dirname(self.xml_file)
+                new_fileworld_path = os.path.join(xml_directory, fileworld_path)
+                self.xml.find('.//' + self.ns + 'FileWorldGenerator').attrib['src'] = new_fileworld_path
         if self.role != 0 and self.agent_count > 1:
             e = etree.Element(self.ns + 'MinecraftServerConnection',
                               attrib={'address': self.instance.host,
@@ -393,15 +402,13 @@ class MineRLEnv(gym.Env):
         for act in action_in:
             # Process enums.
             if isinstance(bottom_env_spec.action_space.spaces[act], spaces.Enum):
-                if isinstance(action_in[act],   int):
+                if np.issubdtype(type(action_in[act]), np.integer):
                     action_in[act] = bottom_env_spec.action_space.spaces[act].values[action_in[act]]
                 else:
                     assert isinstance(
-                        action_in[act], str), "Enum action {} must be str or int".format(act)
-                    assert action_in[act] in bottom_env_spec.action_space.spaces[
-                        act].values, "Invalid value for enum action {}, {}".format(
-                        act, action_in[act])
-
+                        action_in[act], str), "Enum action {} must be str or int. Value observed: {} ".format(act, action_in[act])
+                    assert action_in[act] in self.action_space.spaces[act].values, \
+                        "Invalid string value for enum action {}, {}".format(act, action_in[act])
             elif isinstance(bottom_env_spec.action_space.spaces[act], gym.spaces.Box):
                 subact = action_in[act]
                 assert not isinstance(

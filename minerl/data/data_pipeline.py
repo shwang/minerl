@@ -8,7 +8,7 @@ import os
 import time
 from collections import OrderedDict
 from queue import PriorityQueue, Empty
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Optional
 from itertools import cycle, islice
 import minerl.herobraine.env_spec
 from minerl.herobraine.hero import spaces
@@ -359,6 +359,7 @@ class DataPipeline:
                    seq_len: int,
                    num_epochs: int = -1,
                    preload_buffer_size: int = 2,
+                   epoch_size: Optional[int] = None,
                    seed: int = None,
                    include_metadata: bool = False):
         """Returns batches of sequences length SEQ_LEN of the data of size BATCH_SIZE.
@@ -377,6 +378,7 @@ class DataPipeline:
         Returns:
             Generator: A generator that yields (sarsd) batches
         """
+        assert epoch_size > 0
         # Todo: Not implemented/
         input_queue = multiprocessing.Queue()
         trajectory_queue = multiprocessing.Queue(maxsize=preload_buffer_size)
@@ -405,7 +407,11 @@ class DataPipeline:
 
             jobs = [(f, -1, None)
                     for f in self._get_all_valid_recordings(self.data_dir)]
+            if epoch_size is not None and len(jobs) < epoch_size:
+                raise ValueError("Set epoch size to {epoch_size} "
+                                 " but there are only {len(jobs)} jobs available.")
             np.random.shuffle(jobs)
+            jobs = jobs[:epoch_size]
             for job in jobs:
                 input_queue.put(job)
 
