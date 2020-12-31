@@ -575,13 +575,17 @@ def clean_render_dirs():
     pass
 
 
-def main():
+def main(parallel: bool = True, n_workers: int = NUM_MINECRAFT_DIR):
     """
     The main render script.
+    Args:
+        parallel: If True, then use true multiprocessing to parallelize jobs. Otherwise,
+            use multithreading which allows breakpoints and other debugging tools, but
+            is slower.
     """
 
     if not E(MERGED_DIR):
-        print("{} does not exist. Run merge.py first.")
+        print("{} does not exist. Run merge.py first.".format(MERGED_DIR))
 
     # 1. Load the blacklist.
     blacklist_path = Path(BLACKLIST_PATH)
@@ -614,12 +618,16 @@ def main():
 
     # _render_videos(manager, unfinished_renders[0])
 
+    if parallel:
+        import multiprocessing
+        multiprocessing.freeze_support()
+    else:
+        import multiprocessing.dummy as multiprocessing
+
     # Render videos in multiprocessing queue
-    # multiprocessing.freeze_support()
-    import multiprocessing.dummy as multiprocessing
     with multiprocessing.Pool(
-            NUM_MINECRAFT_DIR, initializer=tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
-        manager = ThreadManager(multiprocessing.Manager(), NUM_MINECRAFT_DIR, 0, 1)
+            n_workers, initializer=tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
+        manager = ThreadManager(multiprocessing.Manager(), n_workers, 0, 1)
         func = functools.partial(_render_videos, manager)
         num_rendered = list(
             tqdm.tqdm(pool.imap_unordered(func, unfinished_renders), total=len(unfinished_renders), desc='Files',

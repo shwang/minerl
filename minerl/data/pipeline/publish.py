@@ -204,8 +204,21 @@ def construct_data_dirs(black_list):
     data_dirs = []
     for exp_folder in tqdm.tqdm(next(os.walk(DATA_DIR))[1], desc='Directories', position=0):
         for experiment_dir in tqdm.tqdm(next(os.walk(J(DATA_DIR, exp_folder)))[1], desc='Experiments', position=1):
-            if not exp_folder.startswith('MineRL') \
-                    and experiment_dir.split('g1_')[-1] not in black_list:
+            exp_name = "{}/{}".format(exp_folder, experiment_dir)
+            if exp_folder.startswith('MineRL'):
+                print("{} was skipped because it begins with 'MineRL'".format(exp_name))
+            elif not experiment_dir.startswith('g1_'):
+                # Skip silently unless file doesn't begin with v3_.
+                # v3_ files are results of this script. The file could end up in this
+                # logic block if the Gym ID of the environment doesn't begin with MineRL.
+                # That could happen for environments that are not officially MineRL envs,
+                # like when someone is building a MineRL extension.
+                if not experiment_dir.startswith('v3_'):
+                    print("{} was skipped because {} doesn't begin with 'v3_'".format(exp_name))
+            elif experiment_dir.split('g1_')[-1] in black_list:
+                print("{} was skipped because it is cached on the dynamically generated blacklist"
+                      .format(exp_name))
+            else:
                 data_dirs.append((experiment_dir, exp_folder))
     return data_dirs
 
@@ -242,11 +255,12 @@ def render_data(output_root, recording_dir, experiment_folder, black_list,
 
     # Gather all renderable environments for this experiment directory
     rendered_envs = 0
-    all_env_specs = tuple(*env.ENVS, *extra_env_specs)
+    all_env_specs = (*envs.ENVS, *extra_env_specs)
     filtered_environments = [
         env_spec for env_spec in all_env_specs if env_spec.is_from_folder(experiment_folder)]
     # Don't render if files are missing
     if not E(source_folder) or not E(recording_source) or not E(universal_source) or not E(metadata_source):
+        print("Blacklisting {}/{}".format(experiment_folder, recording_dir))
         black_list.add(segment_str)
         return 0
 
@@ -264,8 +278,8 @@ def render_data(output_root, recording_dir, experiment_folder, black_list,
 
 
             # TODO remove to incrementally render files - during testing re-render each time
-            if E(J(dest_folder, 'rendered.npz')):
-                os.remove(J(dest_folder, 'rendered.npz'))
+            if E(rendered_dest):
+                os.remove(J(rendered_dest))
 
             # Don't render again, ensure source exits
             if E(rendered_dest):
@@ -354,8 +368,12 @@ def render_data(output_root, recording_dir, experiment_folder, black_list,
                         continue
                 raise e
 
-            # Don't release ones with 1024 reward (they are bad streams) and other smoke-tests
-            if 'Survival' not in environment.name and not isinstance(environment, Obfuscated):
+            if 'Caves' in environment.name:
+                # Without this exception, Caves is autoblacklisted because reward == 0.0.
+                pass
+            # TODO(shwang): Move the following smoke checks to the appropriate EnvSpecs.
+            # At that point, we can get rid of this whole if-else tree.
+            elif 'Survival' not in environment.name and not isinstance(environment, Obfuscated ):
                 # TODO these could be handlers instead!
                 if sum(published['reward']) == 1024.0 and 'Obtain' in environment.name \
                         or sum(published['reward']) < 64 and ('Obtain' not in environment.name) \
@@ -364,7 +382,22 @@ def render_data(output_root, recording_dir, experiment_folder, black_list,
                         or sum(published['action$attack']) == 0 and 'Navigate' not in environment.name:
                     black_list.add(segment_str)
                     print('Hey we should have blacklisted {} tyvm'.format(segment_str))
-                    return 0
+                return 0
+
+            # TODO(shwang): For now, `bool(reason)` is always False. But later when we've
+            # ported the if-else logic immediately above, it will describe why the
+            # environment was blacklisted.
+            reason = environment.auto_blacklist(published)
+            if reason:
+                print(
+                    "{} is auto-blacklisting {}/{} because {}.".format(
+                        environment.__class__.__name__,
+                        experiment_folder,
+                        recording_dir,
+                        reason,
+                    ),
+                )
+                black_list.add(segment_str)
 
             # Setup destination root
             if not E(dest_folder):
@@ -378,7 +411,8 @@ def render_data(output_root, recording_dir, experiment_folder, black_list,
             try:
                 # Copy video if necessary
                 if not E(recording_dest):
-                    shutil.copyfile(src=recording_source, dst=recording_dest)
+                    # Use hardlink to save diskspace. Compatible with both Unix and Windows.
+                    os.link(src=recording_source, dst=recording_dest)
                 np.savez_compressed(rendered_dest, **published)
 
                 with open(metadata_source, 'r') as meta_file:
@@ -402,12 +436,10 @@ def render_data(output_root, recording_dir, experiment_folder, black_list,
     return rendered_envs
 
 
-def publish(extra_env_specs=(), parallel=True):
+def publish(extra_env_specs=(), n_workers=56, parallel=True):
     """
     The main render script.
     """
-    num_w = 56
-
     black_list = Blacklist()
     valid_data = construct_data_dirs(black_list)
     print(valid_data)
@@ -425,8 +457,8 @@ def publish(extra_env_specs=(), parallel=True):
             # easier debugging and PDB-compatibility.
             import multiprocessing.dummy as multiprocessing
 
-        with multiprocessing.Pool(num_w, initializer=tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
-            manager = ThreadManager(multiprocessing.Manager(), num_w, 1, 1)
+        with multiprocessing.Pool(n_workers, initializer=tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
+            manager = ThreadManager(multiprocessing.Manager(), n_workers, 1, 1)
             func = functools.partial(_render_data, DATA_DIR, manager, extra_env_specs=extra_env_specs, parallel=parallel)
             num_segments = list(
                 tqdm.tqdm(pool.imap_unordered(func, valid_data), total=len(valid_data), desc='Files', miniters=1,
@@ -439,14 +471,12 @@ def publish(extra_env_specs=(), parallel=True):
             pool.terminate()
             pool.join()
             raise e
-        print('\n' * num_w)
         print("Exception in pool: ", type(e), e)
         print('Vectorized {} files in total!'.format(sum(num_segments)))
         raise e
 
     num_segments_rendered = sum(num_segments)
 
-    print('\n' * num_w)
     print('Vectorized {} files in total!'.format(num_segments_rendered))
     if E('errors.txt'):
         print('Errors:')
@@ -511,8 +541,8 @@ def package(out_dir=DATA_DIR):
             sha256_file.write('{} {}\n'.format(hashlib.sha256(open(archive_dir, 'rb').read()).hexdigest(), archive))
 
 
-def main(extra_env_specs=(), parallel=True):
-    publish(extra_env_specs, parallel=parallel)
+def main(extra_env_specs=(), parallel=True, n_workers=56):
+    publish(extra_env_specs, parallel=parallel, n_workers=n_workers)
     package()
 
 

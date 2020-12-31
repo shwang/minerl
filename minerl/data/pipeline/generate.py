@@ -8,7 +8,6 @@ render.py
 # 3) Running the video_rendering scripts
 """
 import functools
-import multiprocessing
 from collections import OrderedDict
 import os
 import sys
@@ -521,9 +520,14 @@ def gen_sarsa_pairs(outputPath, inputPath, recordingName, lineNum=None, debug=Fa
     return numNewSegments
 
 
-def main():
+def main(parallel: bool = True, n_workers: int = 2):
     """
     The main render script.
+
+    Args:
+        parallel: If True, then use true multiprocessing to parallelize jobs. Otherwise,
+            use multithreading which allows breakpoints and other debugging tools, but
+            is slower.
     """
 
     # 1. Load the blacklist.
@@ -543,12 +547,16 @@ def main():
     numSegments = []
     if E('errors.txt'):
         os.remove('errors.txt')
-    try:
-        numW = int(sys.argv[1]) if len(sys.argv) > 1 else 2
 
+    if parallel:
+        import multiprocessing
         multiprocessing.freeze_support()
-        with multiprocessing.Pool(numW, initializer=tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
-            manager = ThreadManager(multiprocessing.Manager(), numW, 1, 1)
+    else:
+        import multiprocessing.dummy as multiprocessing
+
+    try:
+        with multiprocessing.Pool(n_workers, initializer=tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
+            manager = ThreadManager(multiprocessing.Manager(), n_workers, 1, 1)
             func = functools.partial(_gen_sarsa_pairs, DATA_DIR, manager)
             numSegments = list(
                 tqdm.tqdm(pool.imap_unordered(func, valid_renders), total=len(valid_renders), desc='Files', miniters=1,
@@ -557,7 +565,7 @@ def main():
             # for recording_name, render_path in tqdm.tqdm(valid_renders, desc='Files'):
             #     numSegmentsRendered += gen_sarsa_pairs(render_path, recording_name, DATA_DIR)
     except Exception as e:
-        print('\n' * numW)
+        print('\n' * n_workers)
         print("Exception in pool: ", type(e), e)
         print('Rendered {} new segments in total!'.format(sum(numSegments)))
         if E('errors.txt'):
@@ -567,11 +575,16 @@ def main():
 
     numSegmentsRendered = sum(numSegments)
 
-    print('\n' * numW)
+    print('\n' * n_workers)
     print('Rendered {} new segments in total!'.format(numSegmentsRendered))
     if E('errors.txt'):
         print('Errors:')
         print(open('errors.txt', 'r').read())
+
+
+def main_console():
+    n_workers = int(sys.argv[1]) if len(sys.argv) > 1 else 2
+    main(n_workers=n_workers)
 
 
 if __name__ == "__main__":

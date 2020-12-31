@@ -16,7 +16,6 @@ import subprocess
 import tempfile
 import struct
 import time
-import multiprocessing
 import numpy as np
 import io
 import argparse
@@ -230,11 +229,13 @@ def merge_stream(stream_name):
         shutil.rmtree(tempdir)
 
 
-def main():
-    parser = argparse.ArgumentParser('Merge Script')
-    parser.add_argument('num_workers', type=int, help='Number of parallel workers.')
-    opts = parser.parse_args()
-
+def main(n_workers: int = 1, parallel: bool = True):
+    """
+    Args:
+        parallel: If True, then use true multiprocessing to parallelize jobs. Otherwise,
+            use multithreading which allows breakpoints and other debugging tools, but
+            is slower.
+    """
     assert E(DOWNLOADED_DIR), (
             "No download directory at {}! Run download2.py first.\n\t"
             .format(DOWNLOADED_DIR))
@@ -268,7 +269,12 @@ def main():
     if not files_to_merge:
         return
 
-    with multiprocessing.Pool(max(opts.num_workers, 1), tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
+    if parallel:
+        import multiprocessing
+    else:
+        import multiprocessing.dummy as multiprocessing
+
+    with multiprocessing.Pool(n_workers, tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
         timings = list(tqdm.tqdm(
             pool.imap_unordered(merge_stream, files_to_merge),
             total=len(files_to_merge), desc='Merging'))
@@ -276,7 +282,7 @@ def main():
         times = np.array([x for x in timings if not isinstance(x, tuple)])
 
     # Write blacklist    
-    for f in (failed_streams):
+    for f in failed_streams:
         if f not in blacklist:
             blacklist.append(f)
     print(blacklist)
@@ -290,5 +296,12 @@ def main():
         print("\t Average time: {}".format(times.mean()))
 
 
+def main_console():
+    """Like main, except it also reads arguments from stdin."""
+    parser = argparse.ArgumentParser('Merge Script')
+    parser.add_argument('num_workers', type=int, help='Number of parallel workers.')
+    opts = parser.parse_args()
+    main(n_workers=opts["num_workers"])
+
 if __name__ == "__main__":
-    main()
+    main_console()
