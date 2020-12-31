@@ -5,7 +5,6 @@ from typing import Optional
 
 import gym
 
-# TODO:
 MISSIONS_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "env_specs", "missions")
 
