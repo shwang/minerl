@@ -62,16 +62,16 @@ class EnvSpec(abc.ABC):
     @abstractmethod
     def determine_success_from_rewards(self, rewards: list) -> bool:
         raise NotImplementedError('subclasses must override determine_success_from_rewards()')
-    
+
     def auto_blacklist(self, npz_data: dict) -> Optional[str]:
         """Return a non-empty str if `publish.py` should blacklist a demonstration.
-        
+
         We can't catch all cases of bad demonstrations automatically, but overriding this
         method can allow for some quick, automatic filtering.
-        
+
         Args:
             npz_data: A dict of numpy values about to be saved as "rendered.npz".
-        
+
         Returns:
             Either None, or a nonempty str describing why this demonstration should be
             blacklisted.
