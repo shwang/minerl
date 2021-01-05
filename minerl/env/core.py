@@ -236,6 +236,7 @@ class MineRLEnv(gym.Env):
         self.xml = e
         self.xml.find(self.ns + 'ClientRole').text = str(self.role)
         self.xml.find(self.ns + 'ExperimentUID').text = self.exp_uid
+        # Replace relative paths with absolute paths
         file_world_generator = self.xml.find('.//' + self.ns + 'FileWorldGenerator')
         if file_world_generator is not None:
             fileworld_path = file_world_generator.attrib['src']
