@@ -1,31 +1,36 @@
+"""
+Merges similar trajectories (by stream name) into compressed zip archives.
+Uses 7z, which has the best compression ratios on the market, for zipping.
+
+Requirements:
+    * 7z: You can install `7z` on Ubuntu with `sudo apt install p7zip`.
+    * Run `download2.sh` first to get the trajectories to compress.
+"""
+
 import os
+import pathlib
 import shutil
 import tqdm
 import glob
 import subprocess
 import tempfile
 import struct
-import time 
-import multiprocessing
-from shutil import copyfile
+import time
 import numpy as np
 import io
-import json
-import re
 import argparse
 
-from subprocess import Popen, PIPE, STDOUT
+from subprocess import STDOUT
 
 from minerl.data.util.constants import (
-    MERGED_DIR, 
-    BLACKLIST_TXT, 
-    PARSE_COMMAND, 
-    Z7_COMMAND, 
+    MERGED_DIR,
+    BLACKLIST_TXT,
+    PARSE_COMMAND,
+    Z7_COMMAND,
     TEMP_ROOT,
     BLOCK_SIZE,
     ACTION_FILE,
     RECORDING_FILE,
-    TEMP_FILE,
     GLOB_STR_BASE
 )
 
@@ -41,8 +46,6 @@ except ImportError:
 
 J = os.path.join
 E = os.path.exists
-
-
 
 def remove(path):
     if E(path):
@@ -153,7 +156,6 @@ def concat(infiles, outfile):
 
 
 def get_files_to_merge(blacklist):
-
     files_to_merge = []
     downloaded_streams = list(glob.glob(J(GLOB_STR_BASE, "player*")))
     for f in tqdm.tqdm(downloaded_streams):
@@ -178,14 +180,16 @@ def merge_stream(stream_name):
     # 1. Concatenate files.
     # 2. Merge files.
     # 3. 7z files
-    # 4. Place ifles
+    # 4. Place files
+    if not E(TEMP_ROOT):
+        pathlib.Path(TEMP_ROOT).mkdir(parents=True)
+
+    tempdir = tempfile.mkdtemp(dir=TEMP_ROOT)
     try:
-        target_name = J(MERGED_DIR, "{}.mcpr".format(stream_name))
-        tempdir = tempfile.mkdtemp(dir=TEMP_ROOT)
         bin_name = J(tempdir, "{}.bin".format(stream_name))
         # Concatenate
         shards = sorted(glob.glob(J(GLOB_STR_BASE, "{}-*".format(stream_name))))
-        
+
         # print(shards)
         t0 = time.time()
         concat(shards, bin_name)
@@ -198,24 +202,23 @@ def merge_stream(stream_name):
         parse_success = (proc.wait() == 0)
 
         if parse_success:
-            
-
             if processFile(results_dir):
-
                 zip_file = "{}.zip".format(stream_name)
                 mcpr_file = "{}.mcpr".format(stream_name)
                 proc = subprocess.Popen(
-                    Z7_COMMAND + ["a", zip_file , J(results_dir, "*") ], cwd=tempdir, stdout=DEVNULL)
+                    Z7_COMMAND + ["a", zip_file, J(results_dir, "*")],
+                    cwd=tempdir,
+                    stdout=DEVNULL)
                 proc.wait()
                 os.rename(J(tempdir, zip_file), J(tempdir, mcpr_file))
 
                 # Overwrite files.
-                if E( J(MERGED_DIR,  mcpr_file)):
+                if E(J(MERGED_DIR,  mcpr_file)):
                     os.remove(J(MERGED_DIR,  mcpr_file))
-                
-                shutil.move( J(tempdir, mcpr_file), MERGED_DIR)
 
-                return (time.time() - t0)
+                shutil.move(J(tempdir, mcpr_file), MERGED_DIR)
+
+                return time.time() - t0
             else:
                 print("FAILED_TO_ZIP {}".format(stream_name))
                 return "FAILED to ZIP", stream_name
@@ -226,16 +229,26 @@ def merge_stream(stream_name):
         shutil.rmtree(tempdir)
 
 
-def main():
-    parser = argparse.ArgumentParser('Merge Script')
-    parser.add_argument('num_workers', type=int, help='Number of parallel workers.')
-    opts = parser.parse_args()
+def main(n_workers: int = 1, parallel: bool = True):
+    """
+    Args:
+        parallel: If True, then use true multiprocessing to parallelize jobs. Otherwise,
+            use multithreading which allows breakpoints and other debugging tools, but
+            is slower.
+    """
+    assert E(DOWNLOADED_DIR), (
+            "No download directory at {}! Run download2.py first.\n\t"
+            .format(DOWNLOADED_DIR))
 
-    assert E(WORKING_DIR), "No output directory created! {}".format(WORKING_DIR)
-    assert E(DOWNLOADED_DIR), "No download directory! Be sure to have the downloaded files prepared:\n\t{}".format(DOWNLOADED_DIR)
+    assert shutil.which("7z") is not None, (
+        "Need to install `7z` first. (Hint: On Ubuntu, use `sudo apt install p7zip`)")
 
+    if not E(WORKING_DIR):
+        pathlib.Path(WORKING_DIR).mkdir(parents=True, exist_ok=True)
 
     if not E(BLACKLIST_TXT):
+        blacklist_path = pathlib.Path(BLACKLIST_TXT)
+        blacklist_path.parent.mkdir(parents=True, exist_ok=True)
         touch(BLACKLIST_TXT)
         blacklist = []
     else:
@@ -256,8 +269,12 @@ def main():
     if not files_to_merge:
         return
 
+    if parallel:
+        import multiprocessing
+    else:
+        import multiprocessing.dummy as multiprocessing
 
-    with multiprocessing.Pool(max(opts.num_workers, 1), tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
+    with multiprocessing.Pool(n_workers, tqdm.tqdm.set_lock, initargs=(multiprocessing.RLock(),)) as pool:
         timings = list(tqdm.tqdm(
             pool.imap_unordered(merge_stream, files_to_merge),
             total=len(files_to_merge), desc='Merging'))
@@ -265,13 +282,12 @@ def main():
         times = np.array([x for x in timings if not isinstance(x, tuple)])
 
     # Write blacklist    
-    for f in (failed_streams):
+    for f in failed_streams:
         if f not in blacklist:
             blacklist.append(f)
     print(blacklist)
     with open(BLACKLIST_TXT, 'w') as f:
         f.write('\n'.join(blacklist))
-
 
     print("FINISHED WITH TIMINGS:")
     print("\t Number of streams succeeded:", len(times))
@@ -280,7 +296,12 @@ def main():
         print("\t Average time: {}".format(times.mean()))
 
 
-
+def main_console():
+    """Like main, except it also reads arguments from stdin."""
+    parser = argparse.ArgumentParser('Merge Script')
+    parser.add_argument('num_workers', type=int, help='Number of parallel workers.')
+    opts = parser.parse_args()
+    main(n_workers=opts["num_workers"])
 
 if __name__ == "__main__":
-    main()
+    main_console()
